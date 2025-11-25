@@ -663,6 +663,14 @@ def privacy_analyzer():
 def privacy_analyzer_html():
     return send_from_directory('.', 'privacy-analyzer.html')
 
+@app.route('/dca-calculator')
+def dca_calculator():
+    return send_from_directory('.', 'dca-calculator.html')
+
+@app.route('/dca-calculator.html')
+def dca_calculator_html():
+    return send_from_directory('.', 'dca-calculator.html')
+
 
 # Initialize database
 with app.app_context():
