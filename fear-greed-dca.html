@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fear & Greed DCA - Plebtools</title>
+    <link rel="icon" type="image/x-icon" href="images/bitcoin retro symbol.jpeg">
+    <link rel="stylesheet" href="styles.css?v=4">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', Arial, sans-serif;
+            background: #f4f6f8;
+            margin: 0;
+            color: #1f2933;
+        }
+
+        .page-shell {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .hero {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2.5rem;
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(118, 75, 162, 0.25);
+            margin-bottom: 2rem;
+        }
+
+        .hero h1 {
+            margin: 0 0 1rem;
+            font-size: 2.75rem;
+        }
+
+        .hero p {
+            font-size: 1.2rem;
+            max-width: 800px;
+            margin: 0;
+            opacity: 0.9;
+        }
+
+        .tool-grid {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 2rem;
+        }
+
+        .btc-summary {
+            display: none;
+            margin: 1.5rem 0 2rem;
+            width: 100%;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .btc-card {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 18px;
+            padding: 1.75rem;
+            box-shadow: 0 15px 40px rgba(79, 70, 229, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.1);
+        }
+
+        .btc-card label {
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.8rem;
+            color: #6b7280;
+            font-weight: 700;
+        }
+
+        .btc-card value {
+            display: block;
+            font-size: 2rem;
+            font-weight: 800;
+            margin: 0.4rem 0;
+            color: #111827;
+        }
+
+        .btc-card p {
+            margin: 0;
+            font-size: 0.9rem;
+            color: #6b7280;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 1.5rem;
+            box-shadow: 0 15px 45px rgba(15, 23, 42, 0.08);
+        }
+
+        .card h2 {
+            margin-top: 0;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.35rem;
+            color: #111827;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 0.75rem 0.9rem;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+            font-size: 1rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.25);
+        }
+
+        button {
+            width: 100%;
+            padding: 0.9rem;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button.primary {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            color: white;
+            box-shadow: 0 15px 30px rgba(249, 115, 22, 0.35);
+        }
+
+        button.primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 20px 30px rgba(249, 115, 22, 0.45);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat {
+            border-radius: 16px;
+            padding: 1.25rem;
+            border: 1px solid #e5e7eb;
+        }
+
+        .stat label {
+            font-size: 0.85rem;
+            color: #6b7280;
+            margin-bottom: 0.2rem;
+        }
+
+        .stat value {
+            display: block;
+            font-size: 1.4rem;
+            font-weight: 700;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+        }
+
+        canvas {
+            width: 100%;
+            height: 360px;
+        }
+
+        .table-wrapper {
+            margin-top: 2rem;
+            overflow-x: auto;
+        }
+
+        .table-note {
+            font-size: 0.9rem;
+            color: #6b7280;
+            margin: 0 0 0.75rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 640px;
+        }
+
+        th, td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+            font-size: 0.95rem;
+        }
+
+        th {
+            background: #f9fafb;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.2rem 0.7rem;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            background: #eef2ff;
+            color: #4338ca;
+            font-weight: 600;
+        }
+
+        .error {
+            background: #fee2e2;
+            border-radius: 12px;
+            padding: 1rem;
+            color: #b91c1c;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .dark-theme body {
+            background: #1b1f2a;
+        }
+
+        .dark-theme .hero,
+        .dark-theme .card,
+        .dark-theme .stat,
+        .dark-theme table,
+        .dark-theme th {
+            background: #0f172a;
+            color: #f3f4f6;
+            border-color: #1e293b;
+        }
+
+        .dark-theme .btc-card {
+            background: #1e2235;
+            border-color: #2f3654;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.45);
+        }
+
+        .dark-theme .btc-card label,
+        .dark-theme .btc-card p {
+            color: #cbd5f5;
+        }
+
+        .dark-theme .btc-card value {
+            color: #f8fafc;
+        }
+
+        .dark-theme #currentWeightDisplay {
+            background: #1e2235;
+            border-color: #2f3654;
+        }
+
+        .dark-theme #currentWeightDisplay p {
+            color: #cbd5f5;
+        }
+
+        @media (max-width: 1024px) {
+            .tool-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="nav-container">
+                <div class="logo-container">
+                    <img src="images/plub tools image.jpeg" alt="Plebtools" class="nav-logo">
+                    <h1 class="logo">Plebtools</h1>
+                </div>
+                <div class="nav-links">
+                    <div class="dropdown" id="toolsDropdown">
+                        <button class="dropdown-btn" id="toolsBtn">Tools <span class="dropdown-arrow">▼</span></button>
+                        <div class="dropdown-content" id="toolsContent" style="display: none;">
+                            <a href="home.html">🏠 Home</a>
+                            <a href="treasury.html">📊 Treasury</a>
+                            <a href="btc-buy-tracker.html">💼 Portfolio</a>
+                            <a href="coveredcall-tracker.html">📈 Covered Calls</a>
+                            <a href="compound-interest-calculator.html">💰 Calculator</a>
+                            <a href="retirement-calculator.html">🏖️ Retirement</a>
+                            <a href="dca-calculator.html">📅 DCA Calculator</a>
+                            <a href="fear-greed-dca.html">🧠 Fear & Greed DCA</a>
+                            <a href="btc-loan-ltv.html">🔒 BTC Loans</a>
+                            <a href="privacy-analyzer.html">🔍 Privacy Analyzer</a>
+                            <a href="pleb-release.html">📰 Pleb Release</a>
+                        </div>
+                    </div>
+                    <a href="account.html" class="account-link">👤 Account</a>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <div class="page-shell">
+            <section class="hero">
+                <h1>Fear & Greed Weighted DCA</h1>
+                <p>
+                    Compare a flat DCA schedule against a strategy that over-allocates during fear
+                    and pulls back during greed. Select your contribution amount, timeframe, and cadence.
+                </p>
+            </section>
+
+            <div class="btc-summary" id="btcSummary">
+                <div class="btc-card">
+                    <label>Flat DCA stack</label>
+                    <value id="flatBtcValue">-</value>
+                    <p>BTC accumulated via constant contributions</p>
+                </div>
+                <div class="btc-card">
+                    <label>F&G weighted stack</label>
+                    <value id="weightedBtcValue">-</value>
+                    <p>BTC accumulated via fear-weighted schedule</p>
+                </div>
+            </div>
+
+            <div class="tool-grid">
+                <aside class="card">
+                    <h2>Configure Backtest</h2>
+                    <div class="error" id="errorBanner" style="display: none;"></div>
+                    <form id="configForm">
+                        <div class="form-group">
+                            <label for="amountInput">Amount per contribution (USD)</label>
+                            <input type="number" id="amountInput" min="1" step="1" value="50" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="startInput">Start date</label>
+                            <input type="date" id="startInput" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="endInput">End date</label>
+                            <input type="date" id="endInput" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="frequencyInput">Contribution cadence</label>
+                            <select id="frequencyInput">
+                                <option value="daily" selected>Daily</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="monthly">Monthly</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label style="font-weight:700; margin-bottom:0.25rem;">Weighting multipliers</label>
+                            <p style="margin-top:0; margin-bottom:0.75rem; font-size:0.85rem; color:#6b7280;">
+                                Higher weight = more USD invested when the index is in that zone. Weights must be greater than zero.
+                            </p>
+                            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(100px,1fr)); gap:0.75rem;">
+                                <div>
+                                    <label for="fearWeight">Fear (0-20)</label>
+                                    <input type="number" id="fearWeight" min="0.1" step="0.1" value="3.0">
+                                </div>
+                                <div>
+                                    <label for="neutralWeight">Neutral (21-79)</label>
+                                    <input type="number" id="neutralWeight" min="0.1" step="0.1" value="1.0">
+                                </div>
+                                <div>
+                                    <label for="greedWeight">Greed (80-100)</label>
+                                    <input type="number" id="greedWeight" min="0.1" step="0.1" value="0.5">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e5e7eb;">
+                            <label style="font-weight:700; margin-bottom:0.5rem;">Current weight</label>
+                            <div id="currentWeightDisplay" style="background: #f9fafb; padding: 1rem; border-radius: 8px; border: 1px solid #e5e7eb;">
+                                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                    <span style="font-size: 1.5rem; font-weight: 700; color: #667eea;" id="currentWeightValue">-</span>
+                                    <span style="font-size: 0.9rem; color: #6b7280;" id="currentWeightLabel">Loading...</span>
+                                </div>
+                                <p style="margin: 0; font-size: 0.85rem; color: #6b7280;" id="currentWeightDetails">-</p>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="primary" id="runBtn">Run backtest</button>
+                    </form>
+                    <p style="font-size: 0.9rem; color: #6b7280; margin-top: 1rem;">
+                        Fear & Greed data is averaged over the selected cadence. Daily uses today's value,
+                        weekly uses a rolling 7-day average, and monthly uses a rolling 30-day average.
+                    </p>
+                </aside>
+
+                <section class="card">
+                    <div class="stats-grid" id="statsGrid">
+                        <div class="stat">
+                            <label>Period</label>
+                            <value id="periodStat">-</value>
+                        </div>
+                        <div class="stat">
+                            <label>Final BTC price</label>
+                            <value id="priceStat">-</value>
+                        </div>
+                        <div class="stat">
+                            <label>Flat ROI</label>
+                            <value id="flatRoiStat">-</value>
+                        </div>
+                        <div class="stat">
+                            <label>Weighted ROI</label>
+                            <value id="weightedRoiStat">-</value>
+                        </div>
+                        <div class="stat">
+                            <label>Capital deployed</label>
+                            <value id="capitalStat">-</value>
+                        </div>
+                    </div>
+
+                    <div class="charts-grid">
+                        <div>
+                            <h3 style="margin-bottom: 0.5rem;">Portfolio value</h3>
+                            <canvas id="valueChart"></canvas>
+                        </div>
+                        <div>
+                            <h3 style="margin-bottom: 0.5rem;">Capital deployed</h3>
+                            <canvas id="capitalChart"></canvas>
+                        </div>
+                        <div>
+                            <h3 style="margin-bottom: 0.5rem;">Fear & Greed vs price</h3>
+                            <canvas id="fgChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <h3 style="margin-bottom: 0.75rem;">Schedule preview</h3>
+                        <p class="table-note" id="weightNote" style="display:none;"></p>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Price</th>
+                                    <th>Fear & Greed</th>
+                                    <th>Weight</th>
+                                    <th>Flat Portfolio</th>
+                                    <th>Weighted Portfolio</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody">
+                                <tr><td colspan="6" style="text-align:center;">Run the backtest to see results.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2024 Plebtools. Open source Bitcoin tracking tools.</p>
+        </div>
+    </footer>
+
+    <script>
+        let valueChart = null;
+        let capitalChart = null;
+        let fgChart = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const today = new Date();
+            const lastYear = new Date();
+            lastYear.setFullYear(today.getFullYear() - 1);
+
+            document.getElementById('startInput').value = formatDate(lastYear);
+            document.getElementById('endInput').value = formatDate(today);
+
+            document.getElementById('configForm').addEventListener('submit', handleSubmit);
+            
+            // Update current weight when frequency or weights change
+            document.getElementById('frequencyInput').addEventListener('change', updateCurrentWeight);
+            document.getElementById('fearWeight').addEventListener('input', updateCurrentWeight);
+            document.getElementById('neutralWeight').addEventListener('input', updateCurrentWeight);
+            document.getElementById('greedWeight').addEventListener('input', updateCurrentWeight);
+            
+            // Initial load
+            updateCurrentWeight();
+            setupDropdown();
+        });
+
+        function formatDate(date) {
+            const yyyy = date.getFullYear();
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const dd = String(date.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
+
+        async function updateCurrentWeight() {
+            const frequency = document.getElementById('frequencyInput').value;
+            const fearWeight = document.getElementById('fearWeight').value;
+            const neutralWeight = document.getElementById('neutralWeight').value;
+            const greedWeight = document.getElementById('greedWeight').value;
+
+            const params = new URLSearchParams({
+                frequency: frequency,
+                fear_weight: fearWeight,
+                neutral_weight: neutralWeight,
+                greed_weight: greedWeight,
+            });
+
+            try {
+                const response = await fetch(`/api/fng-dca/current-weight?${params.toString()}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Unable to fetch current weight.');
+                }
+
+                document.getElementById('currentWeightValue').textContent = data.raw_weight.toFixed(2);
+                
+                const freqLabel = frequency === 'daily' ? 'Daily' : frequency === 'weekly' ? 'Weekly' : 'Monthly';
+                document.getElementById('currentWeightLabel').textContent = `${freqLabel} weight`;
+                
+                const fgValue = Math.round(data.fear_greed_value);
+                const details = `F&G Index: ${fgValue} (${data.period_label})`;
+                document.getElementById('currentWeightDetails').textContent = details;
+            } catch (err) {
+                document.getElementById('currentWeightValue').textContent = '-';
+                document.getElementById('currentWeightLabel').textContent = 'Error';
+                document.getElementById('currentWeightDetails').textContent = err.message;
+            }
+        }
+
+        async function handleSubmit(event) {
+            event.preventDefault();
+            toggleLoading(true);
+            hideError();
+
+            const fearWeight = parseFloat(document.getElementById('fearWeight').value);
+            const neutralWeight = parseFloat(document.getElementById('neutralWeight').value);
+            const greedWeight = parseFloat(document.getElementById('greedWeight').value);
+            const weightArray = [fearWeight, neutralWeight, greedWeight];
+
+            if (weightArray.some(w => !isFinite(w) || w <= 0)) {
+                showError('Please enter weighting values greater than 0 for fear, neutral, and greed.');
+                toggleLoading(false);
+                return;
+            }
+
+            const params = new URLSearchParams({
+                amount: document.getElementById('amountInput').value,
+                start_date: document.getElementById('startInput').value,
+                end_date: document.getElementById('endInput').value,
+                frequency: document.getElementById('frequencyInput').value,
+            });
+            params.set('fear_weight', fearWeight);
+            params.set('neutral_weight', neutralWeight);
+            params.set('greed_weight', greedWeight);
+
+            try {
+                const response = await fetch(`/api/fng-dca?${params.toString()}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Unable to fetch results.');
+                }
+
+                updateStats(data.summary);
+                updateWeightExplanation(data.meta && data.meta.weights);
+                renderCharts(data.series);
+                renderTable(data.series);
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                toggleLoading(false);
+            }
+        }
+
+        function toggleLoading(isLoading) {
+            const btn = document.getElementById('runBtn');
+            btn.disabled = isLoading;
+            btn.textContent = isLoading ? 'Running…' : 'Run backtest';
+        }
+
+        function showError(message) {
+            const banner = document.getElementById('errorBanner');
+            banner.textContent = message;
+            banner.style.display = 'block';
+        }
+
+        function hideError() {
+            const banner = document.getElementById('errorBanner');
+            banner.style.display = 'none';
+            banner.textContent = '';
+        }
+
+        function updateStats(summary) {
+            document.getElementById('periodStat').textContent = `${summary.start.slice(0,10)} → ${summary.end.slice(0,10)} (${summary.points} pts)`;
+            document.getElementById('priceStat').textContent = formatUSD(summary.final_price);
+            document.getElementById('flatRoiStat').innerHTML = `${(summary.flat.roi * 100).toFixed(2)}% <span class="badge">Flat</span>`;
+            document.getElementById('weightedRoiStat').innerHTML = `${(summary.weighted.roi * 100).toFixed(2)}% <span class="badge">Weighted</span>`;
+            document.getElementById('capitalStat').textContent = `${formatUSD(summary.flat.total)} flat / ${formatUSD(summary.weighted.total)} weighted`;
+            updateBtcSummary(summary);
+        }
+
+        function formatUSD(value) {
+            return `$${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+        }
+
+        function updateBtcSummary(summary) {
+            const container = document.getElementById('btcSummary');
+            if (!container) return;
+
+            document.getElementById('flatBtcValue').textContent = `${summary.flat.btc.toFixed(6)} BTC`;
+            document.getElementById('weightedBtcValue').textContent = `${summary.weighted.btc.toFixed(6)} BTC`;
+            container.style.display = 'grid';
+        }
+
+        function updateWeightExplanation(weights) {
+            const note = document.getElementById('weightNote');
+            if (!note) return;
+
+            if (!weights) {
+                note.style.display = 'none';
+                note.textContent = '';
+                return;
+            }
+
+            const fear = Number(weights.fear).toFixed(2);
+            const neutral = Number(weights.neutral).toFixed(2);
+            const greed = Number(weights.greed).toFixed(2);
+
+            note.innerHTML = `
+                Weight column = normalized version of your selected multipliers
+                (fear ${fear}, neutral ${neutral}, greed ${greed}). Values above 1 mean
+                more USD is deployed on that date, values below 1 mean less. We normalize
+                so the average weight over the entire period equals 1.
+            `;
+            note.style.display = 'block';
+        }
+
+        function renderCharts(series) {
+            const labels = series.map(point => point.date);
+            const flatValues = series.map(point => point.flat_value);
+            const weightedValues = series.map(point => point.weighted_value);
+            const flatInvested = series.map(point => point.flat_invested);
+            const weightedInvested = series.map(point => point.weighted_invested);
+            const fgValues = series.map(point => point.fear_greed);
+            const prices = series.map(point => point.price);
+
+            valueChart = renderLineChart(
+                'valueChart',
+                labels,
+                [
+                    { label: 'Flat DCA portfolio', data: flatValues, color: '#f97316' },
+                    { label: 'Fear & Greed weighted', data: weightedValues, color: '#4ade80' },
+                ],
+            );
+
+            capitalChart = renderLineChart(
+                'capitalChart',
+                labels,
+                [
+                    { label: 'Flat contributions', data: flatInvested, color: '#6366f1' },
+                    { label: 'Weighted contributions', data: weightedInvested, color: '#a855f7' },
+                ],
+            );
+
+            if (fgChart) {
+                fgChart.destroy();
+            }
+            const ctx = document.getElementById('fgChart').getContext('2d');
+            fgChart = new Chart(ctx, {
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            type: 'line',
+                            label: 'Fear & Greed index',
+                            data: fgValues,
+                            borderColor: '#facc15',
+                            yAxisID: 'y',
+                            tension: 0.3,
+                            fill: false,
+                        },
+                        {
+                            type: 'line',
+                            label: 'BTC price',
+                            data: prices,
+                            borderColor: '#3b82f6',
+                            yAxisID: 'y1',
+                            borderDash: [6,4],
+                            tension: 0.2,
+                            fill: false,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true },
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Fear & Greed (0-100)' },
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'BTC price (USD)' },
+                            grid: { drawOnChartArea: false },
+                        },
+                    },
+                },
+            });
+        }
+
+        function renderLineChart(canvasId, labels, series) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            if (ctx._chartInstance) {
+                ctx._chartInstance.destroy();
+            }
+
+            const datasets = series.map(set => ({
+                label: set.label,
+                data: set.data,
+                borderColor: set.color,
+                backgroundColor: set.color + '33',
+                borderWidth: 3,
+                tension: 0.25,
+                fill: 'origin',
+            }));
+
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true },
+                    },
+                    scales: {
+                        y: { beginAtZero: false },
+                        x: { ticks: { maxTicksLimit: 8 } },
+                    },
+                },
+            });
+
+            ctx._chartInstance = chart;
+            return chart;
+        }
+
+        function renderTable(series) {
+            if (!series || series.length === 0) {
+                return;
+            }
+
+            const body = document.getElementById('tableBody');
+            const preview = [...series.slice(0, 5), ...series.slice(-5)];
+            let html = '';
+
+            preview.forEach((row, idx) => {
+                if (idx === 5 && series.length > 10) {
+                    html += `<tr><td colspan="6" style="text-align:center;color:#9ca3af;">…</td></tr>`;
+                } else {
+                    html += `
+                        <tr>
+                            <td>${row.date}</td>
+                            <td>${formatUSD(row.price)}</td>
+                            <td>${row.fear_greed}</td>
+                            <td>${row.weight.toFixed(2)}x</td>
+                            <td>${formatUSD(row.flat_value)}</td>
+                            <td>${formatUSD(row.weighted_value)}</td>
+                        </tr>
+                    `;
+                }
+            });
+
+            body.innerHTML = html;
+        }
+
+        function setupDropdown() {
+            const toolsBtn = document.getElementById('toolsBtn');
+            const toolsContent = document.getElementById('toolsContent');
+            let isOpen = false;
+
+            toolsBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (isOpen) {
+                    toolsContent.classList.remove('show');
+                    setTimeout(() => { toolsContent.style.display = 'none'; }, 200);
+                } else {
+                    toolsContent.style.display = 'block';
+                    setTimeout(() => { toolsContent.classList.add('show'); }, 10);
+                }
+                isOpen = !isOpen;
+            });
+
+            document.addEventListener('click', function (e) {
+                if (!document.getElementById('toolsDropdown').contains(e.target)) {
+                    toolsContent.classList.remove('show');
+                    setTimeout(() => { toolsContent.style.display = 'none'; }, 200);
+                    isOpen = false;
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+

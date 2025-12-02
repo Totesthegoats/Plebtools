@@ -8,6 +8,10 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import json
+import time
+
+import pandas as pd
+import requests
 
 # Load environment variables from .env file if it exists
 try:
@@ -33,6 +37,28 @@ MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
 MAIL_USE_TLS = True
 
 db = SQLAlchemy(app)
+
+# Fear & Greed data configuration
+FNG_API_URL = "https://api.alternative.me/fng/?limit=0"
+BINANCE_API_URL = "https://api.binance.com/api/v3/klines"
+BINANCE_SYMBOL = "BTCUSDT"
+BINANCE_INTERVAL = "1d"
+BINANCE_LIMIT = 1000
+BINANCE_START = pd.Timestamp("2017-08-17", tz="UTC")
+
+FNG_BUCKETS = [
+    {"label": "fear", "min": 0, "max": 20},
+    {"label": "neutral", "min": 21, "max": 79},
+    {"label": "greed", "min": 80, "max": 100},
+]
+
+DEFAULT_BUCKET_WEIGHTS = {
+    "fear": 3.0,
+    "neutral": 1.0,
+    "greed": 0.5,
+}
+
+NORMALIZE_FNG_WEIGHTS = True
 
 # Database Models
 class User(db.Model):
@@ -168,6 +194,267 @@ def send_newsletter_welcome(email, username):
     except Exception as e:
         print(f"Error sending newsletter email: {e}")
         return False
+
+
+# ---------------------------------------------------------------------------
+# Fear & Greed - weighted DCA utilities
+# ---------------------------------------------------------------------------
+
+def fetch_fear_greed_history() -> pd.DataFrame:
+    """Fetch full Fear & Greed index history."""
+    resp = requests.get(FNG_API_URL, timeout=30)
+    resp.raise_for_status()
+    payload = resp.json().get("data", [])
+    if not payload:
+        raise ValueError("Fear & Greed API returned no data.")
+
+    df = pd.DataFrame(payload)
+    df["timestamp"] = df["timestamp"].astype("int64")
+    df["date"] = pd.to_datetime(df["timestamp"], unit="s").dt.normalize()
+    df["value"] = df["value"].astype(int)
+    df = df[["date", "value"]].dropna().drop_duplicates("date").sort_values("date")
+    return df.reset_index(drop=True)
+
+
+def fetch_btc_history(start_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.DataFrame:
+    """Fetch BTC daily closes from Binance within a date window."""
+    start_ts = pd.to_datetime(start_date)
+    end_ts = pd.to_datetime(end_date)
+
+    if start_ts.tzinfo is None:
+        start_ts = start_ts.tz_localize("UTC")
+    else:
+        start_ts = start_ts.tz_convert("UTC")
+
+    if end_ts.tzinfo is None:
+        end_ts = end_ts.tz_localize("UTC")
+    else:
+        end_ts = end_ts.tz_convert("UTC")
+
+    end_ts = end_ts + pd.Timedelta(days=1)
+
+    if start_ts < BINANCE_START:
+        start_ts = BINANCE_START
+
+    if end_ts <= start_ts:
+        raise ValueError("End date must be after start date.")
+
+    start_ms = int(start_ts.timestamp() * 1000)
+    end_ms = int(end_ts.timestamp() * 1000)
+    rows = []
+
+    while start_ms < end_ms:
+        params = {
+            "symbol": BINANCE_SYMBOL,
+            "interval": BINANCE_INTERVAL,
+            "startTime": start_ms,
+            "endTime": end_ms,
+            "limit": BINANCE_LIMIT,
+        }
+        resp = requests.get(BINANCE_API_URL, params=params, timeout=30)
+        resp.raise_for_status()
+        batch = resp.json()
+
+        if not batch:
+            break
+
+        rows.extend(batch)
+        last_open = batch[-1][0]
+        next_start = last_open + 24 * 60 * 60 * 1000
+        if next_start <= start_ms:
+            break
+        start_ms = next_start
+        time.sleep(0.1)
+
+    if not rows:
+        raise ValueError("No BTC price data returned for the selected period.")
+
+    cols = [
+        "open_time", "open", "high", "low", "close", "volume",
+        "close_time", "qav", "trades", "tbav", "tbqv", "ignore"
+    ]
+    df = pd.DataFrame(rows, columns=cols)
+    df["date"] = pd.to_datetime(df["open_time"], unit="ms").dt.normalize()
+    df["price"] = df["close"].astype(float)
+    df = df[["date", "price"]].drop_duplicates("date").sort_values("date")
+    return df.reset_index(drop=True)
+
+
+def _assign_weight(value: int, weights: dict) -> float:
+    for bucket in FNG_BUCKETS:
+        if bucket["min"] <= value <= bucket["max"]:
+            return weights.get(bucket["label"], 1.0)
+    return 1.0
+
+
+def prepare_frequency_frame(start_date: str, end_date: str, frequency: str, bucket_weights: dict | None = None) -> pd.DataFrame:
+    """Merge BTC and Fear & Greed data, resampled to the requested cadence."""
+    if frequency not in {"daily", "weekly", "monthly"}:
+        raise ValueError("Frequency must be daily, weekly, or monthly.")
+
+    start_dt = pd.to_datetime(start_date).normalize()
+    end_dt = pd.to_datetime(end_date).normalize()
+    if start_dt >= end_dt:
+        raise ValueError("Start date must be before end date.")
+
+    fng_df = fetch_fear_greed_history()
+    price_df = fetch_btc_history(start_dt, end_dt)
+    merged = pd.merge(price_df, fng_df, on="date", how="inner")
+    merged = merged[(merged["date"] >= start_dt) & (merged["date"] <= end_dt)].copy()
+
+    if merged.empty:
+        raise ValueError("No overlapping BTC and Fear & Greed data.")
+
+    rule = None
+    agg = {"price": "last", "value": "mean"}
+    if frequency == "weekly":
+        rule = "W-MON"
+    elif frequency == "monthly":
+        rule = "M"
+
+    if rule:
+        merged = merged.set_index("date").resample(rule).agg(agg).dropna().reset_index()
+
+    weights = bucket_weights or DEFAULT_BUCKET_WEIGHTS
+    merged["weight_raw"] = merged["value"].apply(lambda v: _assign_weight(v, weights))
+    if NORMALIZE_FNG_WEIGHTS:
+        mean_weight = merged["weight_raw"].mean()
+        merged["weight"] = merged["weight_raw"] / mean_weight if mean_weight else merged["weight_raw"]
+    else:
+        merged["weight"] = merged["weight_raw"]
+
+    return merged[["date", "price", "value", "weight"]]
+
+
+def run_fear_greed_backtest(amount: float, start_date: str, end_date: str, frequency: str, bucket_weights: dict | None = None):
+    """Return cumulative series and summary stats for flat vs. weighted DCA."""
+    df = prepare_frequency_frame(start_date, end_date, frequency, bucket_weights=bucket_weights).sort_values("date").reset_index(drop=True)
+
+    df["invest_flat"] = amount
+    df["btc_flat"] = df["invest_flat"] / df["price"]
+    df["cum_btc_flat"] = df["btc_flat"].cumsum()
+    df["cum_invest_flat"] = df["invest_flat"].cumsum()
+
+    df["invest_weighted"] = amount * df["weight"]
+    df["btc_weighted"] = df["invest_weighted"] / df["price"]
+    df["cum_btc_weighted"] = df["btc_weighted"].cumsum()
+    df["cum_invest_weighted"] = df["invest_weighted"].cumsum()
+
+    final_price = df["price"].iloc[-1]
+    flat_total = df["cum_invest_flat"].iloc[-1]
+    weighted_total = df["cum_invest_weighted"].iloc[-1]
+    flat_value = df["cum_btc_flat"].iloc[-1] * final_price
+    weighted_value = df["cum_btc_weighted"].iloc[-1] * final_price
+
+    summary = {
+        "start": df["date"].iloc[0].isoformat(),
+        "end": df["date"].iloc[-1].isoformat(),
+        "frequency": frequency,
+        "points": len(df),
+        "final_price": final_price,
+        "flat": {
+            "total": flat_total,
+            "btc": df["cum_btc_flat"].iloc[-1],
+            "value": flat_value,
+            "roi": flat_value / flat_total - 1 if flat_total else 0,
+        },
+        "weighted": {
+            "total": weighted_total,
+            "btc": df["cum_btc_weighted"].iloc[-1],
+            "value": weighted_value,
+            "roi": weighted_value / weighted_total - 1 if weighted_total else 0,
+        },
+    }
+
+    summary["weights"] = bucket_weights or DEFAULT_BUCKET_WEIGHTS
+    return df, summary
+
+
+def get_current_weight(frequency: str, bucket_weights: dict | None = None) -> dict:
+    """Calculate today's weight based on frequency and current Fear & Greed data."""
+    if frequency not in {"daily", "weekly", "monthly"}:
+        raise ValueError("Frequency must be daily, weekly, or monthly.")
+    
+    fng_df = fetch_fear_greed_history()
+    if fng_df.empty:
+        raise ValueError("No Fear & Greed data available.")
+    
+    # Ensure dates are normalized (no time component, no timezone)
+    fng_df["date"] = pd.to_datetime(fng_df["date"]).dt.normalize()
+    
+    # Get today's date (normalized, no timezone) - use UTC to match F&G data
+    # Convert to match DataFrame column dtype (datetime64[ns])
+    # Extract date string and convert to ensure consistent type
+    today_date_str = pd.Timestamp.utcnow().normalize().strftime('%Y-%m-%d')
+    today = pd.to_datetime(today_date_str)
+    
+    # Filter to relevant date range based on frequency
+    if frequency == "daily":
+        # Just today's value, or most recent if today not available
+        period_df = fng_df[fng_df["date"] == today].copy()
+        if period_df.empty:
+            # Use most recent available
+            period_df = fng_df.tail(1).copy()
+            period_label = f"most recent ({period_df['date'].iloc[0].strftime('%Y-%m-%d')})"
+        else:
+            period_label = "today"
+    elif frequency == "weekly":
+        # Past 7 days (rolling average)
+        seven_days_ago = pd.to_datetime(today - pd.Timedelta(days=7))
+        period_df = fng_df[(fng_df["date"] >= seven_days_ago) & (fng_df["date"] <= today)].copy()
+        
+        if period_df.empty:
+            # Fallback: use most recent 7 days available
+            most_recent = fng_df["date"].max()
+            seven_days_ago_fallback = pd.to_datetime(most_recent - pd.Timedelta(days=7))
+            period_df = fng_df[(fng_df["date"] >= seven_days_ago_fallback) & (fng_df["date"] <= most_recent)].copy()
+            if period_df.empty:
+                # If still empty, just use most recent value
+                period_df = fng_df.tail(1).copy()
+                period_label = f"most recent ({period_df['date'].iloc[0].strftime('%Y-%m-%d')})"
+            else:
+                period_label = f"past 7 days ({period_df['date'].min().strftime('%Y-%m-%d')} to {period_df['date'].max().strftime('%Y-%m-%d')})"
+        else:
+            period_label = f"past 7 days ({period_df['date'].min().strftime('%Y-%m-%d')} to {period_df['date'].max().strftime('%Y-%m-%d')})"
+    else:  # monthly
+        # Past 30 days (rolling average)
+        thirty_days_ago = pd.to_datetime(today - pd.Timedelta(days=30))
+        period_df = fng_df[(fng_df["date"] >= thirty_days_ago) & (fng_df["date"] <= today)].copy()
+        
+        if period_df.empty:
+            # Fallback: use most recent 30 days available
+            most_recent = fng_df["date"].max()
+            thirty_days_ago_fallback = pd.to_datetime(most_recent - pd.Timedelta(days=30))
+            period_df = fng_df[(fng_df["date"] >= thirty_days_ago_fallback) & (fng_df["date"] <= most_recent)].copy()
+            if period_df.empty:
+                # If still empty, just use most recent value
+                period_df = fng_df.tail(1).copy()
+                period_label = f"most recent ({period_df['date'].iloc[0].strftime('%Y-%m-%d')})"
+            else:
+                period_label = f"past 30 days ({period_df['date'].min().strftime('%Y-%m-%d')} to {period_df['date'].max().strftime('%Y-%m-%d')})"
+        else:
+            period_label = f"past 30 days ({period_df['date'].min().strftime('%Y-%m-%d')} to {period_df['date'].max().strftime('%Y-%m-%d')})"
+    
+    if period_df.empty:
+        # Final fallback: use most recent single value
+        period_df = fng_df.tail(1).copy()
+        period_label = f"most recent available ({period_df['date'].iloc[0].strftime('%Y-%m-%d')})"
+    
+    # Calculate average F&G value for the period
+    avg_fng = period_df["value"].mean()
+    
+    # Apply weight
+    weights = bucket_weights or DEFAULT_BUCKET_WEIGHTS
+    raw_weight = _assign_weight(int(round(avg_fng)), weights)
+    
+    # For display purposes, we don't normalize (normalization is only for backtests)
+    return {
+        "frequency": frequency,
+        "period_label": period_label,
+        "fear_greed_value": float(avg_fng),
+        "raw_weight": float(raw_weight),
+        "period_dates": [d.strftime("%Y-%m-%d") for d in period_df["date"].tolist()],
+    }
 
 # API Routes
 @app.route('/api/register', methods=['POST'])
@@ -593,6 +880,112 @@ def delete_covered_call_trade(trade_id):
         db.session.rollback()
         return jsonify({'error': 'Failed to delete trade'}), 500
 
+
+@app.route('/api/fng-dca', methods=['GET'])
+def fear_greed_dca_api():
+    """Compare flat vs. Fear & Greed-weighted DCA schedules."""
+    try:
+        amount = float(request.args.get("amount", 10))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid amount provided."}), 400
+
+    if amount <= 0:
+        return jsonify({"error": "Amount must be greater than zero."}), 400
+
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    frequency = (request.args.get("frequency", "daily") or "daily").lower()
+
+    if not start_date:
+        return jsonify({"error": "start_date is required (YYYY-MM-DD)."}), 400
+
+    if not end_date:
+        end_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+    bucket_weights = DEFAULT_BUCKET_WEIGHTS.copy()
+    weight_params = {
+        "fear_weight": "fear",
+        "neutral_weight": "neutral",
+        "greed_weight": "greed",
+    }
+    for param, label in weight_params.items():
+        raw = request.args.get(param)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": f"{param} must be a number."}), 400
+        if value <= 0:
+            return jsonify({"error": f"{param} must be greater than zero."}), 400
+        bucket_weights[label] = value
+
+    try:
+        backtest_df, summary = run_fear_greed_backtest(amount, start_date, end_date, frequency, bucket_weights=bucket_weights)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Fear & Greed DCA failure: %s", exc)
+        return jsonify({"error": "Unable to complete F&G DCA calculation."}), 500
+
+    series = []
+    for _, row in backtest_df.iterrows():
+        series.append({
+            "date": row["date"].strftime("%Y-%m-%d"),
+            "price": row["price"],
+            "fear_greed": int(row["value"]),
+            "weight": float(row["weight"]),
+            "flat_invested": float(row["cum_invest_flat"]),
+            "weighted_invested": float(row["cum_invest_weighted"]),
+            "flat_value": float(row["cum_btc_flat"] * row["price"]),
+            "weighted_value": float(row["cum_btc_weighted"] * row["price"]),
+        })
+
+    return jsonify({
+        "summary": summary,
+        "series": series,
+        "meta": {
+            "amount_per_contribution": amount,
+            "frequency": summary["frequency"],
+            "contribution_count": len(series),
+            "weights": summary.get("weights", bucket_weights),
+        }
+    })
+
+
+@app.route('/api/fng-dca/current-weight', methods=['GET'])
+def fear_greed_current_weight_api():
+    """Get today's weight based on selected frequency and weights."""
+    try:
+        frequency = (request.args.get("frequency", "daily") or "daily").lower()
+        if frequency not in {"daily", "weekly", "monthly"}:
+            return jsonify({"error": "Frequency must be daily, weekly, or monthly."}), 400
+        
+        bucket_weights = None
+        fear_weight = request.args.get("fear_weight")
+        neutral_weight = request.args.get("neutral_weight")
+        greed_weight = request.args.get("greed_weight")
+        
+        if fear_weight and neutral_weight and greed_weight:
+            try:
+                bucket_weights = {
+                    "fear": float(fear_weight),
+                    "neutral": float(neutral_weight),
+                    "greed": float(greed_weight),
+                }
+                if any(w <= 0 for w in bucket_weights.values()):
+                    return jsonify({"error": "All weights must be greater than zero."}), 400
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid weight values."}), 400
+        
+        result = get_current_weight(frequency, bucket_weights)
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception("Current weight calculation failure: %s", exc)
+        return jsonify({"error": "Unable to calculate current weight."}), 500
+
 # Static file routes
 @app.route('/')
 def index():
@@ -670,6 +1063,15 @@ def dca_calculator():
 @app.route('/dca-calculator.html')
 def dca_calculator_html():
     return send_from_directory('.', 'dca-calculator.html')
+
+
+@app.route('/fear-greed-dca')
+def fear_greed_dca():
+    return send_from_directory('.', 'fear-greed-dca.html')
+
+@app.route('/fear-greed-dca.html')
+def fear_greed_dca_html():
+    return send_from_directory('.', 'fear-greed-dca.html')
 
 
 # Initialize database
